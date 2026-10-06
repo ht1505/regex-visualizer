@@ -21,7 +21,7 @@ const EXAMPLES = [
   '(ab|ba)*',
   'a*b*',
   '(a|b)(a|b)',
-  'a+b?',
+  'a(b|c)*d',
 ];
 
 const SPEEDS = [
@@ -36,7 +36,6 @@ const OPERATION_NAMES: Record<ConstructionStep['type'], string> = {
   union: 'Union',
   star: 'Kleene Star',
   plus: 'One or More (+)',
-  optional: 'Optional (?)',
   'epsilon-closure': 'ε-closure',
   move: 'Move',
   subset: 'Subset',
@@ -158,6 +157,7 @@ export default function HomePage() {
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('nfa');
   const [detailTab, setDetailTab] = useState<DetailTab>('table');
+  const [showTrapState, setShowTrapState] = useState(false);
 
   // Step control
   const [currentStep, setCurrentStep] = useState(0);
@@ -602,7 +602,6 @@ export default function HomePage() {
                 <span><code>|</code>Union</span>
                 <span><code>*</code>Kleene star</span>
                 <span><code>+</code>One or more</span>
-                <span><code>?</code>Optional</span>
                 <span><code>( )</code>Grouping</span>
                 <span className="syntax-title">Concatenation is implicit.</span>
               </div>
@@ -684,11 +683,24 @@ export default function HomePage() {
                   <span className="panel-title" style={{ alignSelf: 'center', marginRight: 8 }}>Automaton</span>
                   {[
                     { key: 'nfa' as ViewMode, label: 'ε-NFA', count: result?.nfa.states.length, enabled: !!result },
-                    { key: 'dfa' as ViewMode, label: 'DFA', count: result?.dfa.states.length, enabled: !!result },
+                    {
+                      key: 'dfa' as ViewMode,
+                      label: 'DFA',
+                      count: result?.dfa.states.length !== undefined
+                        ? (!showTrapState && result.dfa.states.some(s => s.id === 'dfa_dead' || s.label === 'DEAD')
+                          ? result.dfa.states.length - 1
+                          : result.dfa.states.length)
+                        : undefined,
+                      enabled: !!result,
+                    },
                     {
                       key: 'minimized' as ViewMode,
                       label: 'Minimized DFA',
-                      count: result?.minimizedDFA?.states.length,
+                      count: result?.minimizedDFA?.states.length !== undefined
+                        ? (!showTrapState && result.minimizedDFA.states.some(s => s.id === 'dfa_dead' || s.label === 'DEAD')
+                          ? result.minimizedDFA.states.length - 1
+                          : result.minimizedDFA.states.length)
+                        : undefined,
                       enabled: !!result?.minimizedDFA,
                     },
                   ].map(item => (
@@ -707,7 +719,21 @@ export default function HomePage() {
                     </button>
                   ))}
                 </div>
-                <Legend />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {viewMode !== 'nfa' && result && (result.dfa.states.some(s => s.id === 'dfa_dead' || s.label === 'DEAD') || (result.minimizedDFA?.states.some(s => s.id === 'dfa_dead' || s.label === 'DEAD'))) && (
+                    <button
+                      type="button"
+                      id="toggle-trap-state"
+                      className={`tab ${showTrapState ? 'is-active' : ''}`}
+                      onClick={() => setShowTrapState(prev => !prev)}
+                      title={showTrapState ? "Switch to clean textbook view (hides DEAD trap state)" : "Show complete DFA with DEAD trap state"}
+                      style={{ height: 26, fontSize: 11.5, padding: '0 8px', borderRadius: 4, cursor: 'pointer' }}
+                    >
+                      {showTrapState ? "Hide Trap State" : "Show Trap State"}
+                    </button>
+                  )}
+                  <Legend />
+                </div>
               </div>
 
               <div className="canvas-wrap">
@@ -723,6 +749,7 @@ export default function HomePage() {
                       highlightedTransitions={highlightedTransitions}
                       activeState={viewMode !== 'nfa' ? simHighlight.stateId : null}
                       activeTransition={viewMode !== 'nfa' ? simHighlight.transition : null}
+                      showTrapState={showTrapState}
                       onStateClick={setSelectedState}
                     />
                     {selectedState && (

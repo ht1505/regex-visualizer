@@ -32,24 +32,30 @@ interface AutomataCanvasProps {
   highlightedTransitions?: string[];
   activeState?: string | null;
   activeTransition?: string | null;
+  showTrapState?: boolean;
   onStateClick?: (stateId: string) => void;
 }
 
 const EMPTY: string[] = [];
 
-/** Merge transitions between the same pair into one edge with combined labels. */
+/** Merge transitions between the same pair into one edge with combined, deduplicated, sorted labels. */
 function mergeEdges(transitions: Array<{ from: string; to: string; symbol: string }>) {
   const edgeMap = new Map<string, string[]>();
   for (const t of transitions) {
     const key = `${t.from}|||${t.to}`;
     if (!edgeMap.has(key)) edgeMap.set(key, []);
-    edgeMap.get(key)!.push(t.symbol);
+    if (!edgeMap.get(key)!.includes(t.symbol)) {
+      edgeMap.get(key)!.push(t.symbol);
+    }
+  }
+  for (const symbols of edgeMap.values()) {
+    symbols.sort((a, b) => a.localeCompare(b));
   }
   return edgeMap;
 }
 
 function marker(color: string) {
-  return { type: MarkerType.ArrowClosed, color, width: 14, height: 14 };
+  return { type: MarkerType.ArrowClosed, color, width: 11, height: 11 };
 }
 
 export default function AutomataCanvas({
@@ -62,6 +68,7 @@ export default function AutomataCanvas({
   highlightedTransitions = EMPTY,
   activeState,
   activeTransition,
+  showTrapState = false,
   onStateClick,
 }: AutomataCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -76,9 +83,20 @@ export default function AutomataCanvas({
       return target ? layoutNFA(target) : [];
     } else {
       const target = fullDFA ?? dfa;
-      return target ? layoutDFA(target) : [];
+      if (!target) return [];
+      if (!showTrapState && target.states.some(s => s.id === 'dfa_dead' || s.label === 'DEAD')) {
+        const cleanDFA: DFA = {
+          ...target,
+          states: target.states.filter(s => s.id !== 'dfa_dead' && s.label !== 'DEAD'),
+          transitions: target.transitions.filter(
+            t => t.from !== 'dfa_dead' && t.to !== 'dfa_dead',
+          ),
+        };
+        return layoutDFA(cleanDFA);
+      }
+      return layoutDFA(target);
     }
-  }, [mode, fullNFA, fullDFA, nfa, dfa]);
+  }, [mode, fullNFA, fullDFA, nfa, dfa, showTrapState]);
 
   const posMap = useMemo(() => {
     return new Map<string, NodePosition>(stablePositions.map(p => [p.id, p]));
@@ -104,7 +122,7 @@ export default function AutomataCanvas({
           m === 'nfa'
             ? symbols.some(sym => ht.includes(`${e.source}-${sym}-${e.target}`))
             : hs.includes(e.source);
-        const color = isActive ? '#2563eb' : isHighlighted ? '#3b82f6' : '#64748b';
+        const color = isActive ? '#2563eb' : isHighlighted ? '#3b82f6' : '#000000';
         return {
           ...e,
           data: { ...(e.data as AnimatedEdgeData), isActive, isHighlighted },
@@ -134,7 +152,14 @@ export default function AutomataCanvas({
       }));
       transitions = nfa.transitions;
     } else if (mode === 'dfa' && dfa) {
-      flowNodes = dfa.states.map(s => ({
+      const targetStates = !showTrapState
+        ? dfa.states.filter(s => s.id !== 'dfa_dead' && s.label !== 'DEAD')
+        : dfa.states;
+      const targetTransitions = !showTrapState
+        ? dfa.transitions.filter(t => t.from !== 'dfa_dead' && t.to !== 'dfa_dead')
+        : dfa.transitions;
+
+      flowNodes = targetStates.map(s => ({
         id: s.id,
         type: 'automata',
         position: posMap.get(s.id) ?? { x: 0, y: 0 },
@@ -148,7 +173,7 @@ export default function AutomataCanvas({
           nfaStates: s.nfaStates,
         },
       }));
-      transitions = dfa.transitions;
+      transitions = targetTransitions;
     }
 
     // Build merged edges
@@ -182,7 +207,7 @@ export default function AutomataCanvas({
         source: edge.source,
         target: edge.target,
         type: 'animated',
-        markerEnd: marker('#64748b'),
+        markerEnd: marker('#000000'),
         data: {
           label: edge.symbols.join(', '),
           symbols: edge.symbols,
@@ -201,13 +226,13 @@ export default function AutomataCanvas({
     setEdges(nextEdges);
 
     // Only run fitView when the underlying graph changes, not on animation steps
-    const fitKey = `${mode}-${(fullNFA ?? nfa)?.states.length ?? 0}-${(fullDFA ?? dfa)?.states.length ?? 0}`;
+    const fitKey = `${mode}-${showTrapState}-${(fullNFA ?? nfa)?.states.length ?? 0}-${(fullDFA ?? dfa)?.states.length ?? 0}`;
     if (fitKey !== lastFitKey.current) {
       lastFitKey.current = fitKey;
       const t = setTimeout(() => fitView({ padding: 0.18, duration: 300 }), 60);
       return () => clearTimeout(t);
     }
-  }, [mode, nfa, dfa, fullNFA, fullDFA, posMap, stablePositions, decorate, setNodes, setEdges, fitView]);
+  }, [mode, nfa, dfa, fullNFA, fullDFA, posMap, stablePositions, showTrapState, decorate, setNodes, setEdges, fitView]);
 
   // Update highlighting only (no re-layout, no re-fit, zero jitter)
   const hsKey = highlightedStates.join('|');
@@ -249,9 +274,10 @@ export default function AutomataCanvas({
       maxZoom={2.5}
       nodesConnectable={false}
       proOptions={{ hideAttribution: true }}
+      style={{ background: '#ffffff' }}
     >
       <Controls showInteractive={false} position="bottom-left" />
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#d5d9df" />
+      <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#f1f5f9" />
     </ReactFlow>
   );
 }

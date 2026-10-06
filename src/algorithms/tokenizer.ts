@@ -1,6 +1,6 @@
 // Tokenizer: converts regex string to array of tokens
 
-export type TokenType = 'SYMBOL' | 'UNION' | 'STAR' | 'PLUS' | 'OPTIONAL' | 'LPAREN' | 'RPAREN' | 'CONCAT' | 'EPSILON';
+export type TokenType = 'SYMBOL' | 'UNION' | 'STAR' | 'PLUS' | 'LPAREN' | 'RPAREN' | 'CONCAT' | 'EPSILON';
 
 export interface Token {
   type: TokenType;
@@ -44,10 +44,10 @@ export function validateRegex(regex: string): void {
     throw new Error('Invalid Regular Expression: Empty group "()" not allowed.');
   }
 
-  // Check for invalid characters: only allow a-z, A-Z, 0-9, |, *, +, ?, (, )
-  const validChars = /^[a-zA-Z0-9|*+?()\s]+$/;
+  // Check for invalid characters: only allow a-z, A-Z, 0-9, |, *, +, (, )
+  const validChars = /^[a-zA-Z0-9|*+()\s]+$/;
   if (!validChars.test(regex)) {
-    const invalidChar = regex.split('').find(c => !/[a-zA-Z0-9|*+?()\s]/.test(c));
+    const invalidChar = regex.split('').find(c => !/[a-zA-Z0-9|*+()\s]/.test(c));
     throw new Error(`Invalid Regular Expression: Unsupported character "${invalidChar}".`);
   }
 }
@@ -64,7 +64,6 @@ export function tokenize(regex: string): Token[] {
       case '|': tokens.push({ type: 'UNION', value: '|' }); break;
       case '*': tokens.push({ type: 'STAR', value: '*' }); break;
       case '+': tokens.push({ type: 'PLUS', value: '+' }); break;
-      case '?': tokens.push({ type: 'OPTIONAL', value: '?' }); break;
       case '(': tokens.push({ type: 'LPAREN', value: '(' }); break;
       case ')': tokens.push({ type: 'RPAREN', value: ')' }); break;
       default:
@@ -79,7 +78,7 @@ export function tokenize(regex: string): Token[] {
  * Insert explicit concatenation operator '.' between tokens where needed.
  *
  * Concatenation is inserted between:
- * - SYMBOL, STAR, PLUS, OPTIONAL, or RPAREN followed by SYMBOL or LPAREN
+ * - SYMBOL, STAR, PLUS, or RPAREN followed by SYMBOL or LPAREN
  */
 export function insertConcatenation(tokens: Token[]): Token[] {
   const result: Token[] = [];
@@ -91,7 +90,7 @@ export function insertConcatenation(tokens: Token[]): Token[] {
       const cur = tokens[i];
       const next = tokens[i + 1];
 
-      const curIsOperand = cur.type === 'SYMBOL' || cur.type === 'STAR' || cur.type === 'PLUS' || cur.type === 'OPTIONAL' || cur.type === 'RPAREN';
+      const curIsOperand = cur.type === 'SYMBOL' || cur.type === 'STAR' || cur.type === 'PLUS' || cur.type === 'RPAREN';
       const nextIsOperand = next.type === 'SYMBOL' || next.type === 'LPAREN';
 
       if (curIsOperand && nextIsOperand) {

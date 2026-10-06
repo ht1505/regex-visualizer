@@ -54,7 +54,7 @@ export interface NFAFragment {
 // A step in the construction process (for animation)
 export interface ConstructionStep {
   id: number;
-  type: 'symbol' | 'concat' | 'union' | 'star' | 'plus' | 'optional' | 'epsilon-closure' | 'move' | 'subset' | 'info';
+  type: 'symbol' | 'concat' | 'union' | 'star' | 'plus' | 'epsilon-closure' | 'move' | 'subset' | 'info';
   description: string;
   operand?: string;
   newStates: State[];

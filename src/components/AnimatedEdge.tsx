@@ -88,9 +88,9 @@ const AnimatedEdge = memo(({
     });
   }
 
-  const strokeColor = isActive ? '#2563eb' : isHighlighted ? '#3b82f6' : '#64748b';
-  const strokeWidth = isActive ? 2.2 : isHighlighted ? 1.8 : 1.35;
-  const labelColor = isActive || isHighlighted ? '#1d4ed8' : '#1f2937';
+  const strokeColor = isActive ? '#2563eb' : isHighlighted ? '#3b82f6' : '#000000';
+  const strokeWidth = isActive ? 2.4 : isHighlighted ? 2.0 : 1.8;
+  const labelColor = isActive ? '#1d4ed8' : isHighlighted ? '#2563eb' : '#000000';
 
   return (
     <>
@@ -112,18 +112,17 @@ const AnimatedEdge = memo(({
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
             pointerEvents: 'none',
-            fontFamily: 'var(--mono)',
-            fontSize: 12.5,
-            fontWeight: 500,
+            zIndex: isActive || isHighlighted ? 10 : 2,
+            fontFamily: 'var(--sans), var(--mono), sans-serif',
+            fontSize: 14,
+            fontWeight: 700,
             lineHeight: 1,
-            padding: '2px 5px',
+            padding: '1px 4px',
             background: '#ffffff',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-            border: '1px solid #e2e8f0',
             color: labelColor,
-            borderRadius: 3,
+            borderRadius: 2,
             whiteSpace: 'nowrap',
-            transition: 'color 200ms, border-color 200ms',
+            transition: 'color 200ms',
           }}
         >
           {label}

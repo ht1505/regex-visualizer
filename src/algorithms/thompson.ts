@@ -302,48 +302,6 @@ export function thompsonConstruction(postfix: Token[]): {
         fragmentStart: qStart,
         fragmentAccept: qAccept,
       });
-    } else if (token.type === 'OPTIONAL') {
-      // Zero or one: same as epsilon or frag
-      if (stack.length < 1) throw new Error('Not enough operands for optional.');
-      const frag = stack.pop()!;
-
-      const qStart = freshState();
-      const qAccept = freshState();
-
-      const sStart = makeState(qStart, false, false);
-      const sAccept = makeState(qAccept, false, false);
-
-      const t1 = makeTransition(qStart, frag.start, 'ε');
-      const t2 = makeTransition(qStart, qAccept, 'ε');   // skip entirely
-      const t3 = makeTransition(frag.accept, qAccept, 'ε');
-
-      const newFrag: NFAFragment = {
-        start: qStart,
-        accept: qAccept,
-        states: [sStart, sAccept, ...frag.states],
-        transitions: [...frag.transitions, t1, t2, t3],
-      };
-
-      addStates([sStart, sAccept]);
-      addTransitions([t1, t2, t3]);
-      stack.push(newFrag);
-
-      steps.push({
-        id: stepId++,
-        type: 'optional',
-        description: `Apply OPTIONAL (?, zero or one): ${qStart} can skip to ${qAccept} directly`,
-        newStates: [sStart, sAccept],
-        newTransitions: [t1, t2, t3],
-        highlightedStates: [qStart, qAccept, frag.start, frag.accept],
-        highlightedTransitions: [
-          `${qStart}-ε-${frag.start}`,
-          `${qStart}-ε-${qAccept}`,
-          `${frag.accept}-ε-${qAccept}`,
-        ],
-        nfaSnapshot: snapshotNFA(newFrag),
-        fragmentStart: qStart,
-        fragmentAccept: qAccept,
-      });
     }
   }
 

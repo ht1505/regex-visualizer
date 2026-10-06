@@ -1,5 +1,5 @@
 // Postfix (Reverse Polish Notation) converter using the Shunting Yard Algorithm
-// Operator precedence: * > + > ? > . > |
+// Operator precedence: * > + > . > |
 
 import { Token } from './tokenizer';
 
@@ -8,7 +8,6 @@ type Precedence = { [key: string]: number };
 const PRECEDENCE: Precedence = {
   '|': 1,
   '.': 2,
-  '?': 3,
   '+': 3,
   '*': 3,
 };
@@ -37,7 +36,7 @@ export function toPostfix(tokens: Token[]): Token[] {
       }
       operatorStack.pop(); // remove LPAREN
     } else {
-      // it's an operator: UNION, CONCAT, STAR, PLUS, OPTIONAL
+      // it's an operator: UNION, CONCAT, STAR, PLUS
       const curPrec = PRECEDENCE[token.value] ?? 0;
 
       while (

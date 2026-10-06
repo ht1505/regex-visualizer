@@ -21,10 +21,27 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
   const isDead = label === 'DEAD' || label.startsWith('DEAD') || label.endsWith('DEAD');
 
   const emphasised = isActive || isHighlighted;
-  const stroke = emphasised ? '#2563eb' : selected ? '#1f2937' : isDead ? '#64748b' : '#334155';
-  const fill = isActive ? '#dbeafe' : isHighlighted ? '#eff6ff' : isDead ? '#f8fafc' : '#ffffff';
-  const textColor = emphasised ? '#1d4ed8' : isDead ? '#334155' : '#1f2937';
-  const strokeWidth = isActive ? 2.2 : 1.6;
+
+  // Crisp textbook automata styling matching formal textbook diagrams
+  let fill: string;
+  let stroke: string;
+  let textColor: string;
+
+  if (isDead) {
+    fill = emphasised ? '#f1f5f9' : '#f8fafc';
+    stroke = emphasised ? '#2563eb' : '#64748b';
+    textColor = emphasised ? '#1d4ed8' : '#475569';
+  } else if (isAccept) {
+    fill = emphasised ? '#eff6ff' : '#ffffff';
+    stroke = emphasised ? '#2563eb' : '#000000';
+    textColor = emphasised ? '#1d4ed8' : '#000000';
+  } else {
+    fill = emphasised ? '#eff6ff' : '#ffffff';
+    stroke = emphasised ? '#2563eb' : '#000000';
+    textColor = emphasised ? '#1d4ed8' : '#000000';
+  }
+
+  const strokeWidth = emphasised ? 2.4 : 2;
 
   const subset = isDead
     ? 'trap'
@@ -35,21 +52,34 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
   return (
     <div
       className="fade-in"
-      style={{ width: NODE_SIZE, height: NODE_SIZE, position: 'relative', userSelect: 'none' }}
+      style={{
+        width: NODE_SIZE,
+        height: NODE_SIZE,
+        position: 'relative',
+        userSelect: 'none',
+        filter: emphasised ? 'drop-shadow(0 0 10px rgba(37, 99, 235, 0.35))' : 'none',
+      }}
       title={isDead ? 'DEAD (Trap State)' : stateType === 'dfa' && nfaStates ? `${label} = {${nfaStates.join(', ')}}` : label}
     >
-      {/* Start arrow */}
+      {/* Start indicator: classic solid bullet and arrow entering start state (● ──►) */}
       {isStart && (
-        <svg
-          width="40"
-          height="14"
-          viewBox="0 0 40 14"
-          style={{ position: 'absolute', left: -44, top: NODE_SIZE / 2 - 7, overflow: 'visible' }}
+        <div
+          style={{
+            position: 'absolute',
+            left: -46,
+            top: NODE_SIZE / 2 - 8,
+            display: 'flex',
+            alignItems: 'center',
+            pointerEvents: 'none',
+          }}
           aria-hidden
         >
-          <line x1="0" y1="7" x2="31" y2="7" stroke="#334155" strokeWidth="1.6" />
-          <path d="M30 2 L39 7 L30 12 Z" fill="#334155" />
-        </svg>
+          <svg width="48" height="16" viewBox="0 0 48 16" style={{ overflow: 'visible' }}>
+            <circle cx="5" cy="8" r="4.5" fill="#000000" />
+            <line x1="9" y1="8" x2="38" y2="8" stroke="#000000" strokeWidth="2" />
+            <path d="M37 3.5 L46 8 L37 12.5 Z" fill="#000000" />
+          </svg>
+        </div>
       )}
 
       {/* State shape: double rounded rect for DEAD, circle(s) for normal/accepting */}
@@ -57,26 +87,16 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
         {isDead ? (
           <>
             <rect
-              x={1.5}
-              y={1.5}
-              width={NODE_SIZE - 3}
-              height={NODE_SIZE - 3}
+              x={2}
+              y={2}
+              width={NODE_SIZE - 4}
+              height={NODE_SIZE - 4}
               rx={8}
               fill={fill}
               stroke={stroke}
               strokeWidth={strokeWidth}
+              strokeDasharray="4 3"
               style={{ transition: 'fill 200ms, stroke 200ms' }}
-            />
-            <rect
-              x={6}
-              y={6}
-              width={NODE_SIZE - 12}
-              height={NODE_SIZE - 12}
-              rx={5}
-              fill="none"
-              stroke={stroke}
-              strokeWidth={1.2}
-              style={{ transition: 'stroke 200ms' }}
             />
           </>
         ) : (
@@ -94,10 +114,10 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
               <circle
                 cx={NODE_SIZE / 2}
                 cy={NODE_SIZE / 2}
-                r={NODE_SIZE / 2 - 7.5}
+                r={NODE_SIZE / 2 - 6.5}
                 fill="none"
                 stroke={stroke}
-                strokeWidth={1.6}
+                strokeWidth={1.8}
                 style={{ transition: 'stroke 200ms' }}
               />
             )}
@@ -113,9 +133,9 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontFamily: 'var(--mono)',
-          fontSize: isDead ? 11.5 : 14,
-          fontWeight: 600,
+          fontFamily: 'var(--sans), var(--mono), sans-serif',
+          fontSize: isDead ? 11.5 : 15.5,
+          fontWeight: 700,
           letterSpacing: isDead ? '0.04em' : 'normal',
           color: textColor,
           pointerEvents: 'none',
@@ -135,7 +155,8 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
             transform: 'translateX(-50%)',
             fontFamily: 'var(--mono)',
             fontSize: 10.5,
-            color: isDead ? '#94a3b8' : '#6b7280',
+            fontWeight: 500,
+            color: '#64748b',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
           }}
