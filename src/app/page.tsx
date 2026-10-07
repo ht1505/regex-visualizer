@@ -272,13 +272,13 @@ export default function HomePage() {
     {
       key: 'nfa',
       label: 'ε-NFA',
-      meta: result ? `${result.nfa.states.length} states` : "Thompson's construction",
+      meta: result ? `${result.nfa.states.length} states` : '—',
       onClick: result ? () => handleViewModeChange('nfa') : undefined,
     },
     {
       key: 'subset',
       label: 'Subset Construction',
-      meta: result ? `${result.dfaSteps.length} steps` : 'ε-closure, move',
+      meta: result ? `${result.dfaSteps.length} steps` : '—',
       onClick: result ? () => handleViewModeChange('dfa', 0) : undefined,
     },
     {
@@ -302,10 +302,6 @@ export default function HomePage() {
       if (!step) return null;
       return (
         <>
-          <div className="kv">
-            <span className="kv-label">Method</span>
-            <span className="kv-value">Thompson&apos;s Construction</span>
-          </div>
           <div className="kv">
             <span className="kv-label">Operation</span>
             <span className="kv-value large">
@@ -397,11 +393,6 @@ export default function HomePage() {
 
       return (
         <>
-          <div className="kv">
-            <span className="kv-label">Method</span>
-            <span className="kv-value">Subset Construction</span>
-          </div>
-
           {current && (
             <div className="kv">
               <span className="kv-label">Current DFA state</span>
@@ -483,19 +474,12 @@ export default function HomePage() {
     if (!min) return null;
     return (
       <>
-        <div className="kv">
-          <span className="kv-label">Method</span>
-          <span className="kv-value">DFA Minimization (partition refinement)</span>
-        </div>
         <div className="derivation">
           <div className="d-key">DFA states</div>
           <div className="d-val">{result.dfa.states.length}</div>
           <div className="d-key">Minimized states</div>
           <div className="d-val is-result">{min.states.length}</div>
         </div>
-        <p className="desc-text" style={{ margin: 0, color: 'var(--text-2)' }}>
-          States that cannot be distinguished by any input string are grouped into the same partition and merged into a single state.
-        </p>
         <hr className="divider" />
         <div className="kv">
           <span className="kv-label">Minimized states</span>
@@ -538,9 +522,8 @@ export default function HomePage() {
             </div>
           </div>
           <nav className="header-nav" aria-label="Primary">
-            <a href="#details" className="hide-sm">Transition Table</a>
+            <a href="#details" className="hide-sm" onClick={() => setDetailTab('table')}>Transition Table</a>
             <a href="#details" className="hide-sm" onClick={() => setDetailTab('simulate')}>Simulation</a>
-            <a href="#methods">Documentation</a>
           </nav>
         </div>
       </header>
@@ -912,44 +895,6 @@ export default function HomePage() {
                     onRun={handleSimulationRun}
                   />
                 )}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ------------------------------------------------------- Methods */}
-        <section id="methods" className="section" style={{ borderBottom: 'none' }} aria-labelledby="methods-label">
-          <div className="container">
-            <span id="methods-label" className="section-label">Construction Methods</span>
-            <div className="methods">
-              <div className="method">
-                <div className="method-stage">Regex → ε-NFA</div>
-                <h3 className="method-name">Thompson&apos;s Construction</h3>
-                <p>
-                  The expression is tokenized, explicit concatenation is inserted, and it is converted to postfix
-                  notation. Each symbol yields a two-state fragment; the operators <span className="mono">·</span>,{' '}
-                  <span className="mono">|</span>, <span className="mono">*</span>, <span className="mono">+</span> and{' '}
-                  <span className="mono">?</span> combine fragments using ε-transitions.
-                </p>
-              </div>
-              <div className="method">
-                <div className="method-stage">ε-NFA → DFA</div>
-                <h3 className="method-name">Subset Construction & Completion</h3>
-                <p>
-                  Each DFA state is a set of NFA states. Starting from <span className="mono">ε-closure(q₀)</span>, for every
-                  state <span className="mono">T</span> and symbol <span className="mono">a</span> the target{' '}
-                  <span className="mono">U = ε-closure(move(T, a))</span> is computed. If any state has missing transitions
-                  over alphabet Σ, a non-accepting <span className="mono">DEAD</span> trap state with self-loops is added to ensure
-                  a total transition function.
-                </p>
-              </div>
-              <div className="method">
-                <div className="method-stage">DFA → Minimized DFA</div>
-                <h3 className="method-name">DFA Minimization</h3>
-                <p>
-                  States are split into accepting and non-accepting partitions, which are refined until no partition can
-                  be distinguished by an input symbol. Each remaining partition becomes one state of the minimal DFA.
-                </p>
               </div>
             </div>
           </div>

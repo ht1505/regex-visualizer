@@ -145,26 +145,6 @@ const AutomataNode = memo(({ data, selected }: NodeProps<AutomataNodeData>) => {
         {label}
       </div>
 
-      {/* DFA: underlying NFA state set or trap indicator */}
-      {subset && (
-        <div
-          style={{
-            position: 'absolute',
-            top: NODE_SIZE + 5,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            fontFamily: 'var(--mono)',
-            fontSize: 10.5,
-            fontWeight: 500,
-            color: '#64748b',
-            whiteSpace: 'nowrap',
-            pointerEvents: 'none',
-          }}
-        >
-          {subset}
-        </div>
-      )}
-
       {/* Connection handles in all 4 cardinal directions */}
       <Handle type="target" position={Position.Left} style={{ opacity: 0, left: 1, width: 4, height: 4, minWidth: 0, minHeight: 0, border: 'none' }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0, right: 1, width: 4, height: 4, minWidth: 0, minHeight: 0, border: 'none' }} />

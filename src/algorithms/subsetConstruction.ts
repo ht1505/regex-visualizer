@@ -9,12 +9,9 @@ function setKey(states: string[]): string {
   return [...new Set(states)].sort().join(',');
 }
 
-// Generate DFA state label: A, B, C, ... Z, AA, AB, ...
+// Generate DFA state label: q0, q1, q2, ...
 function generateLabel(index: number): string {
-  if (index < 26) return String.fromCharCode(65 + index);
-  const firstChar = String.fromCharCode(65 + Math.floor(index / 26) - 1);
-  const secondChar = String.fromCharCode(65 + (index % 26));
-  return firstChar + secondChar;
+  return `q${index}`;
 }
 
 export interface SubsetConstructionResult {

@@ -77,15 +77,19 @@ const AnimatedEdge = memo(({
     labelX = (sourceX + 2 * mx + targetX) / 4;
     labelY = (sourceY + 2 * my + targetY) / 4;
   } else {
-    // ── Standard forward edge fallback ──
-    [edgePath, labelX, labelY] = getBezierPath({
-      sourceX,
-      sourceY,
-      sourcePosition,
-      targetX,
-      targetY,
-      targetPosition,
-    });
+    // ── Standard forward edge fallback: crisp textbook straight line ──
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    const dist = Math.hypot(dx, dy) || 1;
+    let nx = -dy / dist;
+    let ny = dx / dist;
+    if (ny > 0 || (Math.abs(ny) < 1e-4 && nx < 0)) {
+      nx = -nx;
+      ny = -ny;
+    }
+    edgePath = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
+    labelX = (sourceX + targetX) / 2 + nx * 14;
+    labelY = (sourceY + targetY) / 2 + ny * 14;
   }
 
   const strokeColor = isActive ? '#2563eb' : isHighlighted ? '#3b82f6' : '#000000';
@@ -114,15 +118,21 @@ const AnimatedEdge = memo(({
             pointerEvents: 'none',
             zIndex: isActive || isHighlighted ? 10 : 2,
             fontFamily: 'var(--sans), var(--mono), sans-serif',
-            fontSize: 14,
+            fontSize: 12.5,
             fontWeight: 700,
-            lineHeight: 1,
-            padding: '1px 4px',
+            lineHeight: '16px',
+            padding: '2px 5.5px',
             background: '#ffffff',
             color: labelColor,
-            borderRadius: 2,
+            border: isActive
+              ? '1px solid #2563eb'
+              : isHighlighted
+              ? '1px solid #3b82f6'
+              : '1px solid rgba(0, 0, 0, 0.22)',
+            borderRadius: 3.5,
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
             whiteSpace: 'nowrap',
-            transition: 'color 200ms',
+            transition: 'color 200ms, border-color 200ms',
           }}
         >
           {label}

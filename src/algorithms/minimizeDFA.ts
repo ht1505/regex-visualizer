@@ -106,9 +106,6 @@ export function minimizeDFA(dfa: DFA): DFA {
   }
 
   // 5. Build minimized DFA states
-  const stateLabels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
-
   let normalLabelIdx = 0;
   const minStates: DFAState[] = partition.map((group, idx) => {
     const isStart = idx === 0;
@@ -118,7 +115,7 @@ export function minimizeDFA(dfa: DFA): DFA {
       return s?.id === 'dfa_dead' || s?.label === 'DEAD';
     });
 
-    const label = hasDead ? 'DEAD' : (stateLabels[normalLabelIdx++] ?? `S${idx}`);
+    const label = hasDead ? 'DEAD' : `q${normalLabelIdx++}`;
 
     const nfaStates = [...group].flatMap(stateId => {
       const ds = dfa.states.find(s => s.id === stateId);

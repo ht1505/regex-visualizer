@@ -18,8 +18,8 @@ export interface NodePosition {
 export const NODE_SIZE = 74;
 const R = NODE_SIZE / 2; // radius = 37
 
-const NFA_H = 145; // horizontal spacing between NFA layers
-const NFA_V = 130; // vertical spacing between NFA branch states
+const NFA_H = 165; // horizontal spacing between NFA layers
+const NFA_V = 150; // vertical spacing between NFA branch states
 
 // ==========================================================================
 // NFA LAYOUT — Thompson-construction-aware semantic positioning
@@ -172,60 +172,91 @@ export function layoutDFA(dfa: DFA): NodePosition[] {
     canReach.set(s.id, reachable);
   }
 
-  // 5. Breadth-First Search (BFS) distance from start state
-  const bfsDist = new Map<string, number>();
-  const queue: string[] = [startStateId];
-  bfsDist.set(startStateId, 0);
+  // 5. Compute distance to nearest accept state for all regular states (reverse BFS)
+  const distToAccept = new Map<string, number>();
+  const acceptSet = new Set(dfa.acceptStates.filter(id => regIdSet.has(id)));
+  const revAdj = new Map<string, string[]>();
+  for (const s of regularStates) revAdj.set(s.id, []);
+  for (const [from, toList] of regAdj.entries()) {
+    for (const to of toList) {
+      revAdj.get(to)!.push(from);
+    }
+  }
 
-  while (queue.length > 0) {
-    const u = queue.shift()!;
-    const curDist = bfsDist.get(u)!;
-    for (const v of regAdj.get(u) || []) {
-      if (!bfsDist.has(v)) {
-        bfsDist.set(v, curDist + 1);
-        queue.push(v);
+  const acceptQueue: string[] = [];
+  for (const acc of acceptSet) {
+    distToAccept.set(acc, 0);
+    acceptQueue.push(acc);
+  }
+  while (acceptQueue.length > 0) {
+    const curr = acceptQueue.shift()!;
+    const curDist = distToAccept.get(curr)!;
+    for (const pred of revAdj.get(curr) || []) {
+      if (!distToAccept.has(pred)) {
+        distToAccept.set(pred, curDist + 1);
+        acceptQueue.push(pred);
       }
     }
   }
 
-  // Handle any unreachable regular states gracefully
-  let maxBfs = 0;
-  for (const d of bfsDist.values()) {
-    if (d > maxBfs) maxBfs = d;
-  }
-  for (const s of regularStates) {
-    if (!bfsDist.has(s.id)) {
-      maxBfs++;
-      bfsDist.set(s.id, maxBfs);
-    }
+  // 6. DFS cycle-breaking from startStateId to identify forward spine edges vs return back-edges
+  const color = new Map<string, number>(); // 0: unvisited, 1: visiting, 2: visited
+  const backEdges = new Set<string>();
+
+  function getSortedTargets(u: string): string[] {
+    const targets = regAdj.get(u) || [];
+    return [...targets].sort((a, b) => {
+      // If a can reach b and b cannot reach a, a must be visited before b (a precedes b in forward flow)
+      const aCanReachB = canReach.get(a)?.has(b) ?? false;
+      const bCanReachA = canReach.get(b)?.has(a) ?? false;
+      if (aCanReachB && !bCanReachA) return -1;
+      if (!aCanReachB && bCanReachA) return 1;
+
+      // Prioritize the state that has a longer forward path to accept
+      const dA = distToAccept.get(a) ?? 999;
+      const dB = distToAccept.get(b) ?? 999;
+      if (dA !== dB) return dB - dA;
+
+      return a.localeCompare(b);
+    });
   }
 
-  // 6. Refine layers using forward reachability & DAG longest path
-  const forwardEdges: Array<{ from: string; to: string }> = [];
-  for (const s of regularStates) {
-    for (const to of regAdj.get(s.id) || []) {
-      const dFrom = bfsDist.get(s.id)!;
-      const dTo = bfsDist.get(to)!;
-      if (dTo > dFrom) {
-        forwardEdges.push({ from: s.id, to });
-      } else if (dTo === dFrom && !canReach.get(to)?.has(s.id)) {
-        forwardEdges.push({ from: s.id, to });
+  function dfs(u: string) {
+    color.set(u, 1);
+    for (const v of getSortedTargets(u)) {
+      if (color.get(v) === 1) {
+        // Target is an active ancestor on current call path -> back-edge (return loop)
+        backEdges.add(`${u}->${v}`);
+      } else if (!color.has(v) || color.get(v) === 0) {
+        dfs(v);
       }
     }
+    color.set(u, 2);
   }
 
-  // Compute layer ranks
-  const layers = new Map<string, number>();
+  dfs(startStateId);
   for (const s of regularStates) {
-    layers.set(s.id, bfsDist.get(s.id)!);
+    if (!color.has(s.id) || color.get(s.id) === 0) dfs(s.id);
   }
+
+  // Forward edges = all non-self-loop transitions not in backEdges
+  const forwardEdges = dfa.transitions.filter(
+    t => t.from !== t.to &&
+         !backEdges.has(`${t.from}->${t.to}`) &&
+         regIdSet.has(t.from) &&
+         regIdSet.has(t.to),
+  );
+
+  // Compute Longest-Path Rank on Forward DAG (Bellman-Ford)
+  const rank = new Map<string, number>();
+  for (const s of regularStates) rank.set(s.id, 0);
 
   for (let iter = 0; iter < regularStates.length; iter++) {
     let changed = false;
     for (const e of forwardEdges) {
-      const req = (layers.get(e.from) ?? 0) + 1;
-      if (req > (layers.get(e.to) ?? 0)) {
-        layers.set(e.to, req);
+      const req = (rank.get(e.from) ?? 0) + 1;
+      if (req > (rank.get(e.to) ?? 0)) {
+        rank.set(e.to, req);
         changed = true;
       }
     }
@@ -233,11 +264,12 @@ export function layoutDFA(dfa: DFA): NodePosition[] {
   }
 
   // Compact layer numbers to consecutive integers 0, 1, 2, ...
-  const uniqueLayers = Array.from(new Set(layers.values())).sort((a, b) => a - b);
+  const uniqueLayers = Array.from(new Set(rank.values())).sort((a, b) => a - b);
   const layerRankMap = new Map<number, number>();
   uniqueLayers.forEach((l, idx) => layerRankMap.set(l, idx));
+  const layers = new Map<string, number>();
   for (const s of regularStates) {
-    layers.set(s.id, layerRankMap.get(layers.get(s.id)!) ?? 0);
+    layers.set(s.id, layerRankMap.get(rank.get(s.id)!) ?? 0);
   }
 
   // Group regular states into layers
@@ -249,8 +281,8 @@ export function layoutDFA(dfa: DFA): NodePosition[] {
   }
 
   // 7. Assign (X, Y) Coordinates
-  const H_SPACING = 210; // generous horizontal spacing for transitions & labels
-  const V_SPACING = 140; // generous vertical spacing between nodes
+  const H_SPACING = 220; // generous horizontal spacing for transitions & labels
+  const V_SPACING = 195; // generous vertical spacing between nodes (prevents vertical label and edge collisions)
   const positions: NodePosition[] = [];
   const assignedY = new Map<string, number>();
 
@@ -361,13 +393,94 @@ export interface EdgeInput {
   curveOffset?: number;
 }
 
+export type CurveType = 'line' | 'quad' | 'cubic';
+
+export interface CurveDefinition {
+  type: CurveType;
+  p0: { x: number; y: number };
+  p1: { x: number; y: number };
+  p2?: { x: number; y: number };
+  p3?: { x: number; y: number };
+  pathString: string;
+}
+
+export interface CurveEvaluation {
+  x: number;
+  y: number;
+  tangentX: number;
+  tangentY: number;
+  normalX: number;
+  normalY: number;
+}
+
+/**
+ * Mathematically evaluates a point, tangent vector, and unit normal vector
+ * at parameter t ∈ [0, 1] on any parametric line, quadratic, or cubic Bézier curve.
+ */
+export function evaluateCurve(curve: CurveDefinition, t: number): CurveEvaluation {
+  let x = 0;
+  let y = 0;
+  let tx = 0;
+  let ty = 0;
+
+  if (curve.type === 'line') {
+    const { p0, p1 } = curve;
+    x = (1 - t) * p0.x + t * p1.x;
+    y = (1 - t) * p0.y + t * p1.y;
+    tx = p1.x - p0.x;
+    ty = p1.y - p0.y;
+  } else if (curve.type === 'quad') {
+    const { p0, p1, p2 } = curve;
+    const p2Def = p2 ?? p1;
+    const mt = 1 - t;
+    x = mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2Def.x;
+    y = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2Def.y;
+    tx = 2 * mt * (p1.x - p0.x) + 2 * t * (p2Def.x - p1.x);
+    ty = 2 * mt * (p1.y - p0.y) + 2 * t * (p2Def.y - p1.y);
+  } else {
+    const { p0, p1, p2, p3 } = curve;
+    const p2Def = p2 ?? p1;
+    const p3Def = p3 ?? p2Def;
+    const mt = 1 - t;
+    x = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2Def.x + t * t * t * p3Def.x;
+    y = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2Def.y + t * t * t * p3Def.y;
+    tx = 3 * mt * mt * (p1.x - p0.x) + 6 * mt * t * (p2Def.x - p1.x) + 3 * t * t * (p3Def.x - p2Def.x);
+    ty = 3 * mt * mt * (p1.y - p0.y) + 6 * mt * t * (p2Def.y - p1.y) + 3 * t * t * (p3Def.y - p2Def.y);
+  }
+
+  const len = Math.hypot(tx, ty) || 1;
+  const utx = tx / len;
+  const uty = ty / len;
+  // Perpendicular unit normal: (-uty, utx)
+  const unx = -uty;
+  const uny = utx;
+
+  return {
+    x,
+    y,
+    tangentX: utx,
+    tangentY: uty,
+    normalX: unx,
+    normalY: uny,
+  };
+}
+
+interface EdgeIntermediate {
+  id: string;
+  label: string;
+  curve: CurveDefinition;
+  isSelfLoop: boolean;
+  getOutwardNormal: (t: number) => { nx: number; ny: number };
+}
+
 /**
  * Computes collision-free, aesthetically routed SVG paths for every edge.
- * - Self-loops: compact, vertical teardrop loops on top with bold label above.
- * - Forward direct transitions: crisp straight horizontal lines with bold label above.
- * - Return loops / back-edges: smooth nested concentric elliptical arcs underneath.
- * - Forward skip edges: fly over the top bypass corridor with guaranteed clearance above self-loops.
- * - Bidirectional transitions: symmetrical quadratic curves on opposite sides.
+ * - Self-loops: compact, vertical teardrop loops with label bound to the loop crest.
+ * - Forward direct transitions: crisp straight lines with label sitting directly above the line.
+ * - Return loops / back-edges: smooth nested concentric elliptical arcs underneath with label at the apex.
+ * - Forward skip edges: fly over the top bypass corridor with guaranteed clearance.
+ * - Bidirectional transitions: symmetrical quadratic curves with labels on respective outer sides.
+ * - Label positioning: strictly evaluated from the curve's actual parametric geometry, collision-checked.
  */
 export function computeAutomataEdgeRoutes(
   positions: NodePosition[],
@@ -382,43 +495,43 @@ export function computeAutomataEdgeRoutes(
     e.source !== e.target &&
     edgeDirSet.has(`${e.target}|||${e.source}`);
 
-  // Set of states that have self-loops
+  // Self-loop direction analysis for every node
   const statesWithSelfLoops = new Set(
     edges.filter(e => e.source === e.target).map(e => e.source),
   );
 
-  // Helper: check if node w is an obstacle in the direct path between u and v
-  const isObstacle = (
-    w: { id: string; cx: number; cy: number },
-    u: { cx: number; cy: number },
-    v: { cx: number; cy: number },
-  ) => {
-    if (w.id === 'dfa_dead') return false;
-    const minX = Math.min(u.cx, v.cx);
-    const maxX = Math.max(u.cx, v.cx);
-    // Any node with center strictly between u and v horizontally
-    if (w.cx <= minX + 5 || w.cx >= maxX - 5) return false;
+  const statesWithTopSelfLoops = new Set<string>();
+  const statesWithBottomSelfLoops = new Set<string>();
 
-    // Perpendicular distance from w to line segment u -> v
-    const dx = v.cx - u.cx;
-    const dy = v.cy - u.cy;
-    const L = Math.hypot(dx, dy);
-    if (L < 1) return false;
-    const dist = Math.abs(dy * w.cx - dx * w.cy + v.cx * u.cy - v.cy * u.cx) / L;
-    return dist < R + 25; // within 62px of line
-  };
+  for (const p of positions) {
+    if (!statesWithSelfLoops.has(p.id)) continue;
+    const hasNodeAbove = positions.some(
+      other => other.id !== p.id && Math.abs(other.x - p.x) < 70 && other.y < p.y - 10,
+    );
+    const hasNodeBelow = positions.some(
+      other => other.id !== p.id && Math.abs(other.x - p.x) < 70 && other.y > p.y + 10,
+    );
+    const loopOnBottom = p.id === 'dfa_dead' || hasNodeAbove || (p.y > 20 && !hasNodeBelow);
+    if (loopOnBottom) {
+      statesWithBottomSelfLoops.add(p.id);
+    } else {
+      statesWithTopSelfLoops.add(p.id);
+    }
+  }
 
-  const getObstacles = (srcId: string, tgtId: string) => {
-    const u = nodeMap.get(srcId);
-    const v = nodeMap.get(tgtId);
-    if (!u || !v) return [];
-    return positions
-      .filter(p => p.id !== srcId && p.id !== tgtId)
-      .map(p => ({ id: p.id, cx: p.x + R, cy: p.y + R }))
-      .filter(w => isObstacle(w, u, v));
-  };
+  // Helper to measure distance from a point to a line segment
+  function pointDistToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+    const projX = x1 + t * dx;
+    const projY = y1 + t * dy;
+    return Math.hypot(px - projX, py - projY);
+  }
 
-  // 2. Classify underneath return loops vs top bypass edges
+  // 2. Classify underneath return loops vs top bypass edges with obstacle detection
   const underneathEdges: Array<{ id: string; span: number; lane: number }> = [];
   const topBypassEdges: Array<{ id: string; minX: number; maxX: number; lane: number }> = [];
 
@@ -431,15 +544,29 @@ export function computeAutomataEdgeRoutes(
     const v = nodeMap.get(edge.target);
     if (!u || !v) continue;
 
-    const isBackward = v.cx < u.cx - 25;
-    const obstacles = getObstacles(edge.source, edge.target);
+    const spanMinX = Math.min(u.cx, v.cx);
+    const spanMaxX = Math.max(u.cx, v.cx);
+    const nodesInSpan = positions.filter(
+      p => p.id !== edge.source && p.id !== edge.target && p.id !== 'dfa_dead' &&
+           p.x + R > spanMinX + 15 && p.x + R < spanMaxX - 15,
+    );
+
+    const isBackward = v.cx < u.cx - 20;
 
     if (isBackward) {
-      // Underneath return loop
+      // Underneath return loop (must clear below all nodes in span)
       underneathEdges.push({ id: edge.id, span: u.cx - v.cx, lane: 0 });
-    } else if (obstacles.length > 0) {
-      // Forward skip over intermediate obstacles -> top bypass
-      topBypassEdges.push({ id: edge.id, minX: u.cx, maxX: v.cx, lane: 0 });
+    } else if (v.cx > u.cx + 20) {
+      // Only bypass if the direct straight line between u and v is obstructed by an intermediate node
+      const isObstructed = nodesInSpan.some(p => {
+        const pcx = p.x + R;
+        const pcy = p.y + R;
+        return pointDistToSegment(pcx, pcy, u.cx, u.cy, v.cx, v.cy) < R + 22;
+      });
+
+      if (isObstructed) {
+        topBypassEdges.push({ id: edge.id, minX: u.cx, maxX: v.cx, lane: 0 });
+      }
     }
   }
 
@@ -461,45 +588,46 @@ export function computeAutomataEdgeRoutes(
   }
   const topLaneMap = new Map(topBypassEdges.map(e => [e.id, e.lane]));
 
-  // Process and compute routes for all edges
+  // Build intermediate curves for all edges
+  const intermediateList: EdgeIntermediate[] = [];
+
   for (const edge of edges) {
     const u = nodeMap.get(edge.source);
     const v = nodeMap.get(edge.target);
     if (!u || !v) continue;
 
-    // ── 1. SELF-LOOP (Compact, vertical teardrop loop on top) ──
+    const label = (edge.symbols && edge.symbols.length > 0) ? edge.symbols.join(', ') : '';
+
+    // ── 1. SELF-LOOP (Orientation-aware: symmetrical loop matching textbook style) ──
     if (edge.source === edge.target) {
-      if (edge.source === 'dfa_dead') {
-        // DEAD self-loop placed cleanly on the BOTTOM
-        const loopH = 46;
-        const sx = u.cx - 12;
-        const sy = u.cy + 34.8;
-        const tx = u.cx + 12;
-        const ty = u.cy + 34.8;
-        const c1x = u.cx - 26;
-        const c1y = u.cy + R + loopH;
-        const c2x = tx;
-        const c2y = ty + 22;
-        result.set(edge.id, {
-          path: `M ${sx} ${sy} C ${c1x} ${c1y} ${c2x} ${c2y} ${tx} ${ty}`,
-          labelX: u.cx,
-          labelY: u.cy + R + loopH + 14,
+      const loopOnBottom = statesWithBottomSelfLoops.has(edge.source);
+      const loopH = 44;
+
+      if (loopOnBottom) {
+        const p0 = { x: u.cx - 14, y: u.cy + 34 };
+        const p1 = { x: u.cx - 28, y: u.cy + R + loopH };
+        const p2 = { x: u.cx + 28, y: u.cy + R + loopH };
+        const p3 = { x: u.cx + 14, y: u.cy + 34 };
+        const pathString = `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`;
+        intermediateList.push({
+          id: edge.id,
+          label,
+          curve: { type: 'cubic', p0, p1, p2, p3, pathString },
+          isSelfLoop: true,
+          getOutwardNormal: () => ({ nx: 0, ny: 1 }),
         });
       } else {
-        // Regular state self-loop on TOP (sleek loop matching textbook diagrams)
-        const loopH = 46;
-        const sx = u.cx - 12;
-        const sy = u.cy - 34.8;
-        const tx = u.cx + 12;
-        const ty = u.cy - 34.8;
-        const c1x = u.cx - 26;
-        const c1y = u.cy - R - loopH;
-        const c2x = tx;
-        const c2y = ty - 22;
-        result.set(edge.id, {
-          path: `M ${sx} ${sy} C ${c1x} ${c1y} ${c2x} ${c2y} ${tx} ${ty}`,
-          labelX: u.cx,
-          labelY: u.cy - R - loopH - 14,
+        const p0 = { x: u.cx - 14, y: u.cy - 34 };
+        const p1 = { x: u.cx - 28, y: u.cy - R - loopH };
+        const p2 = { x: u.cx + 28, y: u.cy - R - loopH };
+        const p3 = { x: u.cx + 14, y: u.cy - 34 };
+        const pathString = `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`;
+        intermediateList.push({
+          id: edge.id,
+          label,
+          curve: { type: 'cubic', p0, p1, p2, p3, pathString },
+          isSelfLoop: true,
+          getOutwardNormal: () => ({ nx: 0, ny: -1 }),
         });
       }
       continue;
@@ -507,55 +635,66 @@ export function computeAutomataEdgeRoutes(
 
     // ── 2. TRANSITIONS TO DEAD STATE (Flow downward along dedicated corridor) ──
     if (edge.target === 'dfa_dead' && edge.source !== 'dfa_dead') {
-      const sx = u.cx;
-      const sy = u.cy + R;
-      const tx = v.cx;
-      const ty = v.cy - R;
-
-      const midY = (sy + ty) / 2;
-
-      result.set(edge.id, {
-        path: `M ${sx} ${sy} C ${sx} ${midY} ${tx} ${midY} ${tx} ${ty}`,
-        labelX: (sx + tx) / 2 + (sx < tx ? -12 : 12),
-        labelY: midY,
+      const midY = (u.cy + R + v.cy - R) / 2;
+      const p0 = { x: u.cx, y: u.cy + R };
+      const p1 = { x: u.cx, y: midY };
+      const p2 = { x: v.cx, y: midY };
+      const p3 = { x: v.cx, y: v.cy - R };
+      const pathString = `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`;
+      intermediateList.push({
+        id: edge.id,
+        label,
+        curve: { type: 'cubic', p0, p1, p2, p3, pathString },
+        isSelfLoop: false,
+        getOutwardNormal: (t: number) => {
+          const ev = evaluateCurve({ type: 'cubic', p0, p1, p2, p3, pathString }, t);
+          return { nx: ev.normalX, ny: ev.normalY };
+        },
       });
       continue;
     }
 
-    // ── 3. BIDIRECTIONAL PAIR (Symmetrical opposite curvature) ──
+    // ── 3. BIDIRECTIONAL PAIR (Symmetrical opposite curvature with generous clearance) ──
     if (isBidir(edge)) {
       const dx = v.cx - u.cx;
       const dy = v.cy - u.cy;
       const dist = Math.hypot(dx, dy) || 1;
       const nx = -dy / dist;
       const ny = dx / dist;
-      const offset = 32;
+
+      const isSteep = Math.abs(dx) < 40;
+      const offset = isSteep ? 52 : 30;
 
       const mx = (u.cx + v.cx) / 2 + nx * offset;
       const my = (u.cy + v.cy) / 2 + ny * offset;
 
-      // Start on u's perimeter in direction toward control point m
       const d1x = mx - u.cx;
       const d1y = my - u.cy;
       const len1 = Math.hypot(d1x, d1y) || 1;
-      const sx = u.cx + R * (d1x / len1);
-      const sy = u.cy + R * (d1y / len1);
+      const p0 = { x: u.cx + R * (d1x / len1), y: u.cy + R * (d1y / len1) };
 
-      // End on v's perimeter from direction of control point m
       const d2x = v.cx - mx;
       const d2y = v.cy - my;
       const len2 = Math.hypot(d2x, d2y) || 1;
-      const tx = v.cx - R * (d2x / len2);
-      const ty = v.cy - R * (d2y / len2);
+      const p2 = { x: v.cx - R * (d2x / len2), y: v.cy - R * (d2y / len2) };
+      const p1 = { x: mx, y: my };
 
-      // Midpoint of quadratic bezier at t = 0.5
-      const qx = 0.25 * sx + 0.5 * mx + 0.25 * tx;
-      const qy = 0.25 * sy + 0.5 * my + 0.25 * ty;
+      const pathString = `M ${p0.x} ${p0.y} Q ${p1.x} ${p1.y} ${p2.x} ${p2.y}`;
+      const curve: CurveDefinition = { type: 'quad', p0, p1, p2, pathString };
 
-      result.set(edge.id, {
-        path: `M ${sx} ${sy} Q ${mx} ${my} ${tx} ${ty}`,
-        labelX: qx + nx * 8,
-        labelY: qy + ny * 8,
+      const bowDirX = mx - (u.cx + v.cx) / 2;
+      const bowDirY = my - (u.cy + v.cy) / 2;
+
+      intermediateList.push({
+        id: edge.id,
+        label,
+        curve,
+        isSelfLoop: false,
+        getOutwardNormal: (t: number) => {
+          const ev = evaluateCurve(curve, t);
+          const dot = ev.normalX * bowDirX + ev.normalY * bowDirY;
+          return dot >= 0 ? { nx: ev.normalX, ny: ev.normalY } : { nx: -ev.normalX, ny: -ev.normalY };
+        },
       });
       continue;
     }
@@ -563,135 +702,268 @@ export function computeAutomataEdgeRoutes(
     // ── 4. SAME-LAYER (VERTICAL) EDGES ──
     if (Math.abs(u.cx - v.cx) < 30) {
       if (u.cy < v.cy) {
-        // u above v: bow out to the right
-        const sx = u.cx + 20;
-        const sy = u.cy + 31.2;
-        const tx = v.cx + 20;
-        const ty = v.cy - 31.2;
-        const mx = Math.max(u.cx, v.cx) + R + 30;
-        const my = (u.cy + v.cy) / 2;
-        result.set(edge.id, {
-          path: `M ${sx} ${sy} Q ${mx} ${my} ${tx} ${ty}`,
-          labelX: mx + 12,
-          labelY: my,
+        const p0 = { x: u.cx + 20, y: u.cy + 31.2 };
+        const p2 = { x: v.cx + 20, y: v.cy - 31.2 };
+        const p1 = { x: Math.max(u.cx, v.cx) + R + 36, y: (u.cy + v.cy) / 2 };
+        const pathString = `M ${p0.x} ${p0.y} Q ${p1.x} ${p1.y} ${p2.x} ${p2.y}`;
+        const curve: CurveDefinition = { type: 'quad', p0, p1, p2, pathString };
+        intermediateList.push({
+          id: edge.id,
+          label,
+          curve,
+          isSelfLoop: false,
+          getOutwardNormal: (t: number) => {
+            const ev = evaluateCurve(curve, t);
+            return ev.normalX >= 0 ? { nx: ev.normalX, ny: ev.normalY } : { nx: -ev.normalX, ny: -ev.normalY };
+          },
         });
       } else {
-        // u below v: bow out to the left
-        const sx = u.cx - 20;
-        const sy = u.cy - 31.2;
-        const tx = v.cx - 20;
-        const ty = v.cy + 31.2;
-        const mx = Math.min(u.cx, v.cx) - R - 30;
-        const my = (u.cy + v.cy) / 2;
-        result.set(edge.id, {
-          path: `M ${sx} ${sy} Q ${mx} ${my} ${tx} ${ty}`,
-          labelX: mx - 12,
-          labelY: my,
+        const p0 = { x: u.cx - 20, y: u.cy - 31.2 };
+        const p2 = { x: v.cx - 20, y: v.cy + 31.2 };
+        const p1 = { x: Math.min(u.cx, v.cx) - R - 36, y: (u.cy + v.cy) / 2 };
+        const pathString = `M ${p0.x} ${p0.y} Q ${p1.x} ${p1.y} ${p2.x} ${p2.y}`;
+        const curve: CurveDefinition = { type: 'quad', p0, p1, p2, pathString };
+        intermediateList.push({
+          id: edge.id,
+          label,
+          curve,
+          isSelfLoop: false,
+          getOutwardNormal: (t: number) => {
+            const ev = evaluateCurve(curve, t);
+            return ev.normalX <= 0 ? { nx: ev.normalX, ny: ev.normalY } : { nx: -ev.normalX, ny: -ev.normalY };
+          },
         });
       }
       continue;
     }
 
-    // ── 5. UNDERNEATH RETURN LOOPS (Smooth nested concentric elliptical arcs) ──
+    // ── 5. UNDERNEATH RETURN LOOPS (Dynamic obstacle clearance below ALL nodes in span) ──
     if (underneathLaneMap.has(edge.id)) {
       const lane = underneathLaneMap.get(edge.id) ?? 0;
-      const depth = 48 + lane * 42; // strictly concentric depths
+      const spanMinX = Math.min(u.cx, v.cx);
+      const spanMaxX = Math.max(u.cx, v.cx);
 
-      // Shallower curves (lane 0) start/end further out along circle sides.
-      // Deeper curves (lane 1, 2...) start/end closer to the bottom center,
-      // guaranteeing that deeper curves are strictly nested below shallower ones with ZERO crossings!
+      const nodesInSpan = positions.filter(
+        p => p.id !== edge.source && p.id !== edge.target && p.id !== 'dfa_dead' &&
+             p.x + R > spanMinX + 12 && p.x + R < spanMaxX - 12,
+      );
+
+      const maxObstacleBottom = Math.max(
+        u.cy + R,
+        v.cy + R,
+        ...nodesInSpan.map(p => (p.y + R) + R + (statesWithBottomSelfLoops.has(p.id) ? 60 : 0)),
+      );
+
+      const targetBottomY = maxObstacleBottom + 45 + lane * 38;
+      const depth = Math.max(48 + lane * 38, targetBottomY - Math.max(u.cy, v.cy));
+
       const angleOffset = Math.min(lane * 0.12, 0.36);
       const angleOut = 1.5 * Math.PI - 0.48 + angleOffset;
       const angleIn = 1.5 * Math.PI + 0.48 - angleOffset;
 
-      const sx = u.cx + R * Math.cos(angleOut);
-      const sy = u.cy - R * Math.sin(angleOut);
-      const tx = v.cx + R * Math.cos(angleIn);
-      const ty = v.cy - R * Math.sin(angleIn);
+      const p0 = { x: u.cx + R * Math.cos(angleOut), y: u.cy - R * Math.sin(angleOut) };
+      const p3 = { x: v.cx + R * Math.cos(angleIn), y: v.cy - R * Math.sin(angleIn) };
 
-      // Sweeping elliptical control points
-      const spanX = sx - tx;
-      const c1x = sx - spanX * 0.18;
-      const c1y = sy + depth * 1.35;
-      const c2x = tx + spanX * 0.18;
-      const c2y = ty + depth * 1.35;
+      const spanX = p0.x - p3.x;
+      const p1 = { x: p0.x - spanX * 0.18, y: p0.y + depth * 1.35 };
+      const p2 = { x: p3.x + spanX * 0.18, y: p3.y + depth * 1.35 };
 
-      result.set(edge.id, {
-        path: `M ${sx} ${sy} C ${c1x} ${c1y} ${c2x} ${c2y} ${tx} ${ty}`,
-        labelX: (u.cx + v.cx) / 2,
-        labelY: Math.max(sy, ty) + depth + 14,
+      const pathString = `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`;
+      const curve: CurveDefinition = { type: 'cubic', p0, p1, p2, p3, pathString };
+
+      intermediateList.push({
+        id: edge.id,
+        label,
+        curve,
+        isSelfLoop: false,
+        getOutwardNormal: (t: number) => {
+          const ev = evaluateCurve(curve, t);
+          return ev.normalY >= 0 ? { nx: ev.normalX, ny: ev.normalY } : { nx: -ev.normalX, ny: -ev.normalY };
+        },
       });
       continue;
     }
 
-    // ── 6. TOP BYPASS (Forward skip edges clearing over intermediate nodes AND self-loops) ──
+    // ── 6. TOP BYPASS (Dynamic obstacle clearance above ALL nodes and self-loops in span) ──
     if (topLaneMap.has(edge.id)) {
       const lane = topLaneMap.get(edge.id) ?? 0;
-      const spanMin = Math.min(u.cx, v.cx);
-      const spanMax = Math.max(u.cx, v.cx);
+      const spanMinX = Math.min(u.cx, v.cx);
+      const spanMaxX = Math.max(u.cx, v.cx);
 
-      // Check if any intermediate state in the span has a self-loop on top
-      const hasSelfLoopInSpan = positions.some(
-        p => p.x + R > spanMin + 5 && p.x + R < spanMax - 5 && statesWithSelfLoops.has(p.id),
+      const nodesInSpan = positions.filter(
+        p => p.id !== edge.source && p.id !== edge.target && p.id !== 'dfa_dead' &&
+             p.x + R > spanMinX + 12 && p.x + R < spanMaxX - 12,
       );
 
-      // Fly strictly above self-loops if any exist
-      const topObstacleY = hasSelfLoopInSpan ? -R - 60 : -R;
-      const laneY = topObstacleY - 35 - lane * 30;
+      const minObstacleTop = Math.min(
+        u.cy - R,
+        v.cy - R,
+        ...nodesInSpan.map(p => (p.y + R) - R - (statesWithTopSelfLoops.has(p.id) ? 60 : 0)),
+      );
 
-      // Launch and land at 45-degree angles to avoid any self-loops on source or target
-      const sx = u.cx + 24;
-      const sy = u.cy - 28;
-      const tx = v.cx - 24;
-      const ty = v.cy - 28;
+      const laneY = minObstacleTop - 45 - lane * 32;
 
-      const spanX = tx - sx;
-      const c1x = sx + spanX * 0.18;
-      const c1y = laneY;
-      const c2x = tx - spanX * 0.18;
-      const c2y = laneY;
+      const p0 = { x: u.cx + 24, y: u.cy - 28 };
+      const p3 = { x: v.cx - 24, y: v.cy - 28 };
 
-      result.set(edge.id, {
-        path: `M ${sx} ${sy} C ${c1x} ${c1y} ${c2x} ${c2y} ${tx} ${ty}`,
-        labelX: (u.cx + v.cx) / 2,
-        labelY: laneY - 14,
+      const spanX = p3.x - p0.x;
+      const p1 = { x: p0.x + spanX * 0.18, y: laneY };
+      const p2 = { x: p3.x - spanX * 0.18, y: laneY };
+
+      const pathString = `M ${p0.x} ${p0.y} C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`;
+      const curve: CurveDefinition = { type: 'cubic', p0, p1, p2, p3, pathString };
+
+      intermediateList.push({
+        id: edge.id,
+        label,
+        curve,
+        isSelfLoop: false,
+        getOutwardNormal: (t: number) => {
+          const ev = evaluateCurve(curve, t);
+          return ev.normalY <= 0 ? { nx: ev.normalX, ny: ev.normalY } : { nx: -ev.normalX, ny: -ev.normalY };
+        },
       });
+      continue;
     }
 
-    // ── 7. DIRECT FORWARD EDGE (Crisp straight line when horizontally aligned) ──
+    // ── 7. DIRECT FORWARD EDGE (Formal textbook straight arrow between circle perimeters) ──
     const dx = v.cx - u.cx;
     const dy = v.cy - u.cy;
     const dist = Math.hypot(dx, dy) || 1;
 
-    if (Math.abs(dy) < 10) {
-      // Perfectly horizontal forward edge (crisp straight line)
-      const sx = u.cx + R;
-      const sy = u.cy;
-      const tx = v.cx - R;
-      const ty = v.cy;
-      result.set(edge.id, {
-        path: `M ${sx} ${sy} L ${tx} ${ty}`,
-        labelX: (sx + tx) / 2,
-        labelY: sy - 14,
-      });
-    } else {
-      // Smooth forward S-curve for states at different vertical levels
-      const sx = u.cx + R * (dx / dist);
-      const sy = u.cy + R * (dy / dist);
-      const tx = v.cx - R * (dx / dist);
-      const ty = v.cy - R * (dy / dist);
+    const p0 = { x: u.cx + R * (dx / dist), y: u.cy + R * (dy / dist) };
+    const p1 = { x: v.cx - R * (dx / dist), y: v.cy - R * (dy / dist) };
+    const pathString = `M ${p0.x} ${p0.y} L ${p1.x} ${p1.y}`;
+    const curve: CurveDefinition = { type: 'line', p0, p1, pathString };
 
-      const c1x = sx + (tx - sx) * 0.42;
-      const c1y = sy;
-      const c2x = tx - (tx - sx) * 0.42;
-      const c2y = ty;
+    intermediateList.push({
+      id: edge.id,
+      label,
+      curve,
+      isSelfLoop: false,
+      getOutwardNormal: (t: number) => {
+        const ev = evaluateCurve(curve, t);
+        let ny = ev.normalY;
+        let nx = ev.normalX;
+        if (ny > 0 || (Math.abs(ny) < 1e-4 && nx < 0)) {
+          nx = -nx;
+          ny = -ny;
+        }
+        return { nx, ny };
+      },
+    });
+  }
 
-      result.set(edge.id, {
-        path: `M ${sx} ${sy} C ${c1x} ${c1y} ${c2x} ${c2y} ${tx} ${ty}`,
-        labelX: (sx + tx) / 2,
-        labelY: (sy + ty) / 2 - 12,
-      });
+  // ── 8. DETERMINISTIC COLLISION-AWARE LABEL PLACEMENT ──
+  // Track placed label bounding boxes to guarantee zero overlaps
+  const placedBoxes: Array<{
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    cx: number;
+    cy: number;
+  }> = [];
+
+  function boxIntersectsNode(cx: number, cy: number, w: number, h: number, node: NodePosition): boolean {
+    const ncx = node.x + R;
+    const ncy = node.y + R;
+    const halfW = w / 2;
+    const halfH = h / 2;
+    const clampX = Math.max(cx - halfW, Math.min(ncx, cx + halfW));
+    const clampY = Math.max(cy - halfH, Math.min(ncy, cy + halfH));
+    const distSq = (ncx - clampX) * (ncx - clampX) + (ncy - clampY) * (ncy - clampY);
+    return distSq < (R + 4) * (R + 4);
+  }
+
+  // Sort edges deterministically: self-loops first, straight lines next, bidirectional, bypass, return
+  const edgePriority = (item: EdgeIntermediate) => {
+    if (item.isSelfLoop) return 0;
+    if (item.curve.type === 'line') return 1;
+    if (item.curve.type === 'quad') return 2;
+    return 3;
+  };
+  intermediateList.sort((a, b) => edgePriority(a) - edgePriority(b) || a.id.localeCompare(b.id));
+
+  for (const item of intermediateList) {
+    const labelText = item.label;
+    const boxW = Math.max(24, labelText.length * 8.5 + 13);
+    const boxH = 22;
+
+    const tCandidates = item.isSelfLoop
+      ? [0.5, 0.48, 0.52]
+      : [0.5, 0.42, 0.58, 0.35, 0.65, 0.28, 0.72];
+
+    const offsetCandidates = item.isSelfLoop
+      ? [8, 12, 5, 15]
+      : [8, 11, 5, 14, 0];
+
+    let bestX = 0;
+    let bestY = 0;
+    let bestScore = Infinity;
+
+    for (const t of tCandidates) {
+      const ev = evaluateCurve(item.curve, t);
+      const norm = item.getOutwardNormal(t);
+
+      for (const offset of offsetCandidates) {
+        const lx = ev.x + norm.nx * offset;
+        const ly = ev.y + norm.ny * offset;
+
+        const minX = lx - boxW / 2;
+        const maxX = lx + boxW / 2;
+        const minY = ly - boxH / 2;
+        const maxY = ly + boxH / 2;
+
+        // Check node collisions
+        let nodeCollision = false;
+        for (const p of positions) {
+          if (boxIntersectsNode(lx, ly, boxW, boxH, p)) {
+            nodeCollision = true;
+            break;
+          }
+        }
+
+        // Check label collisions with already placed labels
+        let labelCollision = false;
+        let overlapArea = 0;
+        for (const pb of placedBoxes) {
+          const overlapX = Math.max(0, Math.min(maxX, pb.maxX) - Math.max(minX, pb.minX));
+          const overlapY = Math.max(0, Math.min(maxY, pb.maxY) - Math.max(minY, pb.minY));
+          if (overlapX > 0 && overlapY > 0) {
+            labelCollision = true;
+            overlapArea += overlapX * overlapY;
+          }
+        }
+
+        let score = Math.abs(t - 0.5) * 80 + Math.abs(offset - 8);
+        if (nodeCollision) score += 10000;
+        if (labelCollision) score += 2000 + overlapArea;
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestX = lx;
+          bestY = ly;
+          if (score === 0) break;
+        }
+      }
+      if (bestScore === 0) break;
     }
+
+    placedBoxes.push({
+      minX: bestX - boxW / 2,
+      maxX: bestX + boxW / 2,
+      minY: bestY - boxH / 2,
+      maxY: bestY + boxH / 2,
+      cx: bestX,
+      cy: bestY,
+    });
+
+    result.set(item.id, {
+      path: item.curve.pathString,
+      labelX: bestX,
+      labelY: bestY,
+    });
   }
 
   return result;
